@@ -15,6 +15,8 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import PDFPageAggregator
 from pdfminer.layout import LAParams, LTTextBox, LTTextLine, LTFigure, LTImage, LTChar
+from pdfminer.layout import LTContainer, LTPage, LTText, LTLine, LTRect, LTCurve
+from pdfminer.layout import LTTextBoxVertical, LTTextGroup
 
 def with_pdf (pdf_doc, fn, pdf_pwd, *args):
     """Open the pdf document, and apply the function, returning the results"""
@@ -29,7 +31,7 @@ def with_pdf (pdf_doc, fn, pdf_pwd, *args):
         # connect the parser and document objects
         parser.set_document(doc)
         # supply the password for initialization
-        doc.initialize(pdf_pwd)
+        # doc.initialize(pdf_pwd)
 
         if doc.is_extractable:
             # apply the function and return the result
@@ -147,34 +149,83 @@ def update_page_text_hash (h, lt_obj, pct=0.2):
 
     return h
 
+idd=0
+def map_coordinates(bbox,pgnum,font,size,img_width,img_height,line_spacing):
+    # left = x0, top = (50-y1)
+    # top = pgnum*50-bbox[3] 
+    top = 1.5*(936*pgnum - bbox[3])   #top = 936 - y1
+    # left = bbox[0]
+    left = 1.8*bbox[0]              #left = x0
+    width = 1.8*(bbox[2]-bbox[0])     #width = x1-x0
+    
+    #write to css file the new id style
+    # #outer { 
+    #        position: absolute; 
+    #        top: 0px; left: 0px; 
+    #        width: 200px; 
+    #        color: red;
+    #      }
+    img_width*=1.8
+    img_height*=1
+    line_spacing*=1.5
+    # size*=0.7
+    # css = '#id_'+ str(idd) + ' {\n position: absolute;\n top: '+ str(top)+'px; left: ' + str(left) +'px;\n width: '+ str(width) + 'px;\n font-family: \"'+ font+'\";\n font-size: '+ str(size) + 'pt;\nwidth: '+str(img_width)+'px; height: '+str(img_height)+'%;\n}\n'
+    css = '#id_'+ str(idd) + ' {\n position: absolute;\n top: '+ str(top)+'px; left: ' + str(left) +'px;\n font-family: \"'+ font+'\";\n font-size: '+ str(size) + 'px;\n line-height: '+str(line_spacing)+'px;\n width: '+str(img_width)+'px;\n height: '+str(img_height)+'%;\n}\n'
+    
+    f = open('css/mystyle.css','a')
+    f.write(css)
+    f.close()
+    global idd
+    idd+=1
+    return idd-1
+
+import operator
+figs=[]
 def parse_lt_objs (lt_objs, page_number, images_folder, text=[]):
     """Iterate through the list of LT* objects and capture the text or image data contained in each"""
     text_content = [] 
 
     page_text = {} # k=(x0, x1) of the bbox, v=list of text strings within that bbox width (physical column)
     for lt_obj in lt_objs:
-        if isinstance(lt_obj, LTTextBox) or isinstance(lt_obj, LTTextLine):
-            # text, so arrange is logically based on its column width
-            page_text = update_page_text_hash(page_text, lt_obj)
-        elif isinstance(lt_obj, LTImage):
+        if isinstance(lt_obj, LTImage):
             # an image, so save it to the designated folder, and note its place in the text 
             saved_file = save_image(lt_obj, page_number, images_folder)
             if saved_file:
                 # use html style <img /> tag to mark the position of the image within the text
-                text_content.append('<img src="'+os.path.join(images_folder, saved_file)+'" />')
+                idd=map_coordinates(lt_obj.bbox,page_number,"",0,lt_obj.width, lt_obj.height,0)
+                figs.append((idd,os.path.join(images_folder, saved_file),lt_obj))                
             else:
-                print >> sys.stderr, "error saving image on page", page_number, lt_obj.__repr__
+                print >> sys.stderr, "error image not jpeg on page", page_number
         elif isinstance(lt_obj, LTFigure):
             # LTFigure objects are containers for other LT* objects, so recurse through the children
-            text_content.append(parse_lt_objs(lt_obj, page_number, images_folder, text_content))
-
-    for k, v in sorted([(key,value) for (key,value) in page_text.items()]):
-        # sort the page_text hash by the keys (x0,x1 values of the bbox),
-        # which produces a top-down, left-to-right sequence of related columns
-        text_content.append(''.join(v))
-
-    return '\n'.join(text_content)
-
+            parse_lt_objs(lt_obj, page_number, images_folder, text_content)
+        elif isinstance(lt_obj,LTTextBox):
+            fontname=""
+            size=0
+            line_spacing = 0
+            j = 0
+            for x in lt_obj:
+                # print('___',x)
+                if isinstance(x,LTTextLine):
+                    # print('******',x)
+                    for y in x:
+                        if isinstance(y,LTChar):
+                            fontname = y.fontname.split('+')
+                            fontname = fontname[len(fontname)-1].strip()
+                            size = y.size
+                    if j==0 and len(lt_obj)<2:
+                        line_spacing=0
+                        break
+                    elif j==1:
+                        line_spacing -= x.bbox[1]
+                        break
+                    
+                    line_spacing = x.bbox[1]
+                    j+=1
+            idd=map_coordinates(lt_obj.bbox,page_number,fontname,size,lt_obj.width,lt_obj.height,line_spacing)
+            figs.append((idd,to_bytestring(lt_obj.get_text()),lt_obj))
+        elif isinstance(lt_obj, LTRect) or isinstance(lt_obj, LTLine):
+            figs.append((idd,lt_obj.x0,lt_obj.y1,lt_obj.width,lt_obj.height,page_number,lt_obj))
 
 ###
 ### Processing Pages
@@ -194,10 +245,11 @@ def _parse_pages (doc, images_folder):
         # receive the LTPage object for this page
         layout = device.get_result()
         # layout is an LTPage object which may contain child objects like LTTextBox, LTFigure, LTImage, etc.
-        text_content.append(parse_lt_objs(layout, (i+1), images_folder))
+        figs.append((i+1,'p'))
+        parse_lt_objs(layout, (i+1), images_folder)
 
-    return text_content
+    return figs
 
-def get_pages (pdf_doc, pdf_pwd='', images_folder='/tmp'):
+def get_pages (pdf_doc, pdf_pwd='', images_folder='img'):
     """Process each of the pages in this pdf file and return a list of strings representing the text found in each page"""
     return with_pdf(pdf_doc, _parse_pages, pdf_pwd, *tuple([images_folder]))

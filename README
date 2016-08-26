@@ -1,3 +1,46 @@
+This is a pdf to html converter.
+It uses PDFminer python package as a parser. (Documentation here https://euske.github.io/pdfminer/programming.html)
+I forked The layout_scanner.py from here https://github.com/inas404/pdfminer-layout-scanner/blob/master/layout_scanner.py
+And added new functions, and edited the way of parsing.
+
+When using this converter, put the pdf file in the directory test/ and when you run the main.py type in the filname.
+It should create a folder with the name of the pdf file in the root directory.
+The directory should look like this:
+
+Pdf2Html/
+                layout_scanner.py
+                main.py
+                Readme.txt
+                test/
+                       test1.pdf
+                       test2.pdf
+                       ...
+                test1/
+                    css/
+                        mystyle.css
+                    img/
+                        img1.jpeg
+                        img2.jpeg
+                    index.html
+
+Files:
+
+1- layout_scanner.py: 
+To parse the pdf file using PDFminer package. Returns a tree with Pdf figures.
+And to map coordinates from the PDF world to html world coordinates. (function map coordinates)
+The new coordinates are mapped, then saved to a css file css/mystyle.css with the figure id.
+
+2- Pdf2Html.py:
+I wrote this class file. It is where the html file is made.
+The html file maps the figure with its id, to the css corresponding id with all the style and propertirs of this figure.
+
+3- main.py:
+It takes input from the user with the pdf file name, e.g. "mytest.pdf" where this file exists in 
+the "test" directory.(e.g. "test/mytest.pdf").
+
+
+==================================================================================================
+
 PDFMiner (http://www.unixuser.org/~euske/python/pdfminer/index.html)
 is a pdf parsing library written in Python by Yusuke Shinyama.
 
